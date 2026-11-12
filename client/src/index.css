@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply min-h-full bg-gradient-to-br from-gray-900 to-black text-gray-100 antialiased;
+    color-scheme: dark;
+  }
+
+  ::selection {
+    @apply bg-accent/40 text-white;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-white/20;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply rounded-2xl border border-white/20 bg-white/10 shadow-lg backdrop-blur-md;
+  }
+
+  .glass-hover {
+    @apply transition-all duration-300 hover:scale-[1.02] hover:border-white/30 hover:bg-white/15;
+  }
+
+  .input-glass {
+    @apply w-full rounded-xl border border-white/30 bg-transparent px-3 py-2.5 text-sm text-white placeholder-gray-400 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/40;
+  }
+
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/30 transition-all duration-300 hover:scale-105 hover:bg-accent/90 active:scale-100 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-glass {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-gray-100 backdrop-blur-md transition-all duration-300 hover:scale-105 hover:border-white/30 hover:bg-white/20 active:scale-100;
+  }
+
+  .icon-btn {
+    @apply grid h-8 w-8 place-items-center rounded-lg border border-white/15 bg-white/5 text-gray-300 transition-all duration-300 hover:scale-105 hover:bg-white/20 hover:text-white;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold;
+  }
+}
+
+.auth-bg {
+  background-color: #05070d;
+  background-image:
+    radial-gradient(ellipse 70% 60% at 12% 0%, rgba(190, 18, 60, 0.28), transparent 60%),
+    radial-gradient(ellipse 60% 55% at 92% 18%, rgba(30, 58, 138, 0.3), transparent 62%),
+    radial-gradient(ellipse 80% 70% at 50% 110%, rgba(76, 5, 25, 0.35), transparent 65%);
+}
+
+.auth-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse at center, black 20%, transparent 78%);
+  mask-image: radial-gradient(ellipse at center, black 20%, transparent 78%);
+}
+
+.field-invalid {
+  border-color: rgba(248, 113, 113, 0.85) !important;
+  box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.12) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+#qr-reader {
+  width: 100%;
+}
+
+#qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+}
+
+#qr-reader__scan_region {
+  min-height: 100%;
+}
