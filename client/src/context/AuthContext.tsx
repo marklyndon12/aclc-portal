@@ -25,9 +25,10 @@ interface AuthContextValue {
     password: string,
     remember?: boolean
   ) => Promise<SessionUser>;
-  signup: (payload: SignupPayload, remember?: boolean) => Promise<SessionUser>;
+  signup: (payload: SignupPayload) => Promise<void>;
   logout: () => Promise<void>;
   expireSession: () => void;
+  updateUser: (user: SessionUser) => void;
   dismissSessionExpired: () => void;
 }
 
@@ -88,17 +89,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [persist]
   );
 
-  const signup = useCallback(
-    async (payload: SignupPayload, remember = true) => {
-      const result = await api.post<LoginResponse>("/api/auth/signup", payload);
-      if (result.token) {
-        persist(result.token, result.user, remember);
-      }
-      setSessionExpired(false);
-      return result.user;
-    },
-    [persist]
-  );
+  // Registration only submits a request; the account can sign in once an admin approves it.
+  const signup = useCallback(async (payload: SignupPayload) => {
+    await api.post("/api/auth/signup", payload);
+  }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -116,6 +110,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const dismissSessionExpired = useCallback(() => setSessionExpired(false), []);
 
+  // Apply a fresher copy of the profile (e.g. after an admin moves a student to another section).
+  const updateUser = useCallback(
+    (next: SessionUser) => {
+      if (!state.token) return;
+      if (JSON.stringify(next) === JSON.stringify(state.user)) return;
+      persist(state.token, next, localStorage.getItem(TOKEN_KEY) !== null);
+    },
+    [persist, state.token, state.user]
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user: state.user,
@@ -125,9 +129,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signup,
       logout,
       expireSession,
+      updateUser,
       dismissSessionExpired,
     }),
-    [state, sessionExpired, login, signup, logout, expireSession, dismissSessionExpired]
+    [state, sessionExpired, login, signup, logout, expireSession, updateUser, dismissSessionExpired]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

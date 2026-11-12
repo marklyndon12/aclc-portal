@@ -1,25 +1,29 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Pencil, Plus, Search, Trash2, Users } from "lucide-react";
+import { Check, Pencil, Plus, Search, Trash2, Users, X } from "lucide-react";
 import clsx from "clsx";
 import { toast } from "sonner";
 import Modal from "../../components/Modal";
 import { GlassInput, GlassSelect } from "../../components/ui/FormControls";
 import { useAdminData } from "../../context/AdminDataContext";
+import { api, ApiError } from "../../lib/api";
+import type { AdminDataState } from "../../data/adminSeed";
 import { roleLabel } from "../../lib/roles";
 import type { AdminUserRow, Role } from "../../types";
 
+type RemoteData = Omit<AdminDataState, "version">;
+
 interface Draft {
   username: string;
+  password: string;
   full_name: string;
   role: Role;
-  status: "Active" | "Disabled";
 }
 
 const emptyDraft: Draft = {
   username: "",
+  password: "",
   full_name: "",
   role: "student",
-  status: "Active",
 };
 
 const roleBadgeClass: Record<Role, string> = {
@@ -29,7 +33,8 @@ const roleBadgeClass: Record<Role, string> = {
 };
 
 export default function ManageUsers() {
-  const { data, setData } = useAdminData();
+  const { data, replaceData } = useAdminData();
+  const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -57,15 +62,15 @@ export default function ManageUsers() {
   const openEdit = (row: AdminUserRow) => {
     setDraft({
       username: row.username,
+      password: "",
       full_name: row.full_name,
       role: row.role,
-      status: row.status,
     });
     setEditingId(row.user_id);
     setOpen(true);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const username = draft.username.trim();
     const fullName = draft.full_name.trim();
@@ -74,44 +79,68 @@ export default function ManageUsers() {
       toast.error("Username and full name are required");
       return;
     }
-
-    const duplicate = data.users.some(
-      (row) => row.username.toLowerCase() === username.toLowerCase() && row.user_id !== editingId
-    );
-    if (duplicate) {
-      toast.error("That username is already in use");
+    if (!editingId && draft.password.length < 8) {
+      toast.error("Password must be at least 8 characters");
+      return;
+    }
+    if (editingId && draft.password && draft.password.length < 8) {
+      toast.error("New password must be at least 8 characters");
       return;
     }
 
-    if (editingId) {
-      setData((previous) => ({
-        ...previous,
-        users: previous.users.map((row) =>
-          row.user_id === editingId ? { ...row, ...draft, username, full_name: fullName } : row
-        ),
-      }));
-      toast.success(`Updated @${username}`);
-    } else {
-      setData((previous) => ({
-        ...previous,
-        users: [
-          { user_id: crypto.randomUUID(), ...draft, username, full_name: fullName },
-          ...previous.users,
-        ],
-      }));
-      toast.success(`Created @${username}`);
+    setSaving(true);
+    try {
+      const remote = editingId
+        ? await api.patch<RemoteData>(`/api/admin/users/${editingId}`, {
+            username,
+            full_name: fullName,
+            ...(draft.password ? { password: draft.password } : {}),
+          })
+        : await api.post<RemoteData>("/api/admin/users", {
+            username,
+            full_name: fullName,
+            role: draft.role,
+            password: draft.password,
+          });
+      replaceData(remote);
+      toast.success(editingId ? `Updated @${username}` : `Created @${username}`);
+      setOpen(false);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not save user");
+    } finally {
+      setSaving(false);
     }
-
-    setOpen(false);
   };
 
-  const handleDelete = (row: AdminUserRow) => {
+  const pendingCount = data.users.filter((row) => row.status === "Pending").length;
+
+  const decide = async (row: AdminUserRow, decision: "approve" | "reject") => {
+    if (
+      decision === "reject" &&
+      !window.confirm(`Reject the registration of @${row.username}? They will not be able to sign in.`)
+    ) {
+      return;
+    }
+    try {
+      replaceData(
+        await api.patch<RemoteData>(`/api/admin/users/${row.user_id}/approval`, { decision })
+      );
+      toast.success(
+        decision === "approve" ? `Approved @${row.username}` : `Rejected @${row.username}`
+      );
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not update approval");
+    }
+  };
+
+  const handleDelete = async (row: AdminUserRow) => {
     if (!window.confirm(`Delete account @${row.username}?`)) return;
-    setData((previous) => ({
-      ...previous,
-      users: previous.users.filter((item) => item.user_id !== row.user_id),
-    }));
-    toast.success(`Removed @${row.username}`);
+    try {
+      replaceData(await api.delete<RemoteData>(`/api/admin/users/${row.user_id}`));
+      toast.success(`Removed @${row.username}`);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not delete user");
+    }
   };
 
   return (
@@ -121,8 +150,8 @@ export default function ManageUsers() {
           <span className="badge border-accent/40 bg-accent/15 text-accent">Accounts</span>
           <h1 className="mt-3 text-2xl font-bold text-gray-100">Manage Users</h1>
           <p className="mt-1 max-w-2xl text-sm text-gray-400">
-            All portal accounts, their roles, and access status. Temporary data is stored
-            locally in this browser.
+            All portal accounts, their roles, and sign-up approval. Student course and
+            section are set on the Students page.
           </p>
         </div>
         <button type="button" onClick={openCreate} className="btn-accent">
@@ -130,6 +159,13 @@ export default function ManageUsers() {
           Add user
         </button>
       </section>
+
+      {pendingCount > 0 ? (
+        <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          {pendingCount} registration{pendingCount > 1 ? "s are" : " is"} waiting for your
+          approval.
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-[220px] flex-1">
@@ -190,9 +226,14 @@ export default function ManageUsers() {
                       <span
                         className={clsx(
                           "badge",
-                          row.status === "Active"
-                            ? "border-green-400/30 bg-green-400/10 text-green-400"
-                            : "border-gray-400/30 bg-gray-400/10 text-gray-400"
+                          row.status === "Active" &&
+                            "border-green-400/30 bg-green-400/10 text-green-400",
+                          row.status === "Pending" &&
+                            "border-amber-400/30 bg-amber-400/10 text-amber-300",
+                          row.status === "Rejected" &&
+                            "border-red-400/30 bg-red-400/10 text-red-300",
+                          row.status === "Disabled" &&
+                            "border-gray-400/30 bg-gray-400/10 text-gray-400"
                         )}
                       >
                         {row.status}
@@ -200,6 +241,26 @@ export default function ManageUsers() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
+                        {row.status === "Pending" ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => decide(row, "approve")}
+                              className="inline-flex items-center gap-1 rounded-lg border border-green-400/30 bg-green-400/10 px-2.5 py-1 text-xs font-semibold text-green-300 transition hover:bg-green-400/20"
+                            >
+                              <Check size={13} />
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => decide(row, "reject")}
+                              className="inline-flex items-center gap-1 rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1 text-xs font-semibold text-red-300 transition hover:bg-red-400/20"
+                            >
+                              <X size={13} />
+                              Reject
+                            </button>
+                          </>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => openEdit(row)}
@@ -239,7 +300,7 @@ export default function ManageUsers() {
         open={open}
         onClose={() => setOpen(false)}
         title={editingId ? "Edit user" : "Add user"}
-        description="Temporary admin data is saved in this browser."
+        description="Saved to the database."
         size="md"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -263,28 +324,29 @@ export default function ManageUsers() {
               label="Role"
               value={draft.role}
               onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}
+              disabled={Boolean(editingId)}
+              hint={editingId ? "An account's role can't be changed." : undefined}
             >
               <option value="student">Student</option>
               <option value="teacher">Teacher</option>
               <option value="admin">Administrator</option>
             </GlassSelect>
-            <GlassSelect
-              label="Status"
-              value={draft.status}
-              onChange={(event) =>
-                setDraft({ ...draft, status: event.target.value as Draft["status"] })
-              }
-            >
-              <option value="Active">Active</option>
-              <option value="Disabled">Disabled</option>
-            </GlassSelect>
+            <GlassInput
+              label={editingId ? "New password" : "Password"}
+              type="password"
+              value={draft.password}
+              onChange={(event) => setDraft({ ...draft, password: event.target.value })}
+              placeholder={editingId ? "Leave blank to keep the current one" : "At least 8 characters"}
+              autoComplete="new-password"
+              required={!editingId}
+            />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setOpen(false)} className="btn-glass">
               Cancel
             </button>
-            <button type="submit" className="btn-accent">
-              Save changes
+            <button type="submit" disabled={saving} className="btn-accent">
+              {saving ? "Saving..." : "Save changes"}
             </button>
           </div>
         </form>

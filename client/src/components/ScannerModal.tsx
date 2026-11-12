@@ -4,13 +4,14 @@ import { Camera, Loader2, RefreshCw, ScanLine } from "lucide-react";
 import { toast } from "sonner";
 import Modal from "./Modal";
 import { ApiError, api } from "../lib/api";
-import type { Course, ScanResult } from "../types";
+import { localDate } from "../lib/dates";
+import type { TeacherClass, ScanResult } from "../types";
 
 const SCAN_COOLDOWN_MS = 2500;
 
 interface ScannerModalProps {
   open: boolean;
-  course: Course | null;
+  course: TeacherClass | null;
   onClose: () => void;
   onScanned?: (result: ScanResult) => void;
 }
@@ -42,16 +43,21 @@ export default function ScannerModal({
       lastScan.current = { text: decodedText, at: now };
 
       try {
-        const result = await api.post<ScanResult>("/api/attendance/scan", {
-          course_id: course.course_id,
+        const raw = await api.post<ScanResult>("/api/teacher/attendance/scan", {
+          class_id: course.class_id,
           payload: decodedText,
+          date: localDate(),
         });
+        const result: ScanResult = {
+          ...raw,
+          time: new Date(raw.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
         toast.success(`${result.student_name} marked ${result.status}`, {
-          description: `${course.course_code} · ${result.time}`,
+          description: `${course.subject_code} · ${result.time}`,
         });
         onScanned?.(result);
       } catch (error) {
-        if (error instanceof ApiError && (error.code === "QR_EXPIRED" || error.status === 400)) {
+        if (error instanceof ApiError && (error.code === "QR_EXPIRED" || error.code === "QR_INVALID")) {
           toast.error("Expired or invalid QR", {
             description: "Ask the student to refresh their live ID and try again.",
           });
@@ -137,7 +143,7 @@ export default function ScannerModal({
       title="Attendance Scanner"
       description={
         course
-          ? `${course.course_code} · ${course.course_name} · ${course.section_name ?? "No section"}`
+          ? `${course.subject_code} · ${course.subject_name} · ${course.section_name}`
           : "Select a course to begin."
       }
       size="lg"

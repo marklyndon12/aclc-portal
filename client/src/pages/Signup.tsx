@@ -1,18 +1,22 @@
-import { useState, type FormEvent } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, Navigate } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
   Briefcase,
+  Building2,
+  CheckCircle2,
+  ChevronDown,
   GraduationCap,
+  Layers,
   Loader2,
   Lock,
-  Mail,
+  Sparkles,
   ShieldCheck,
   User,
 } from "lucide-react";
 import { toast } from "sonner";
-import { ApiError } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { homePath } from "../lib/roles";
 import { useAuth } from "../context/AuthContext";
 import AuthShell from "../components/auth/AuthShell";
@@ -23,30 +27,68 @@ type AccountRole = "student" | "teacher";
 
 interface FieldErrors {
   full_name?: string;
-  email?: string;
   username?: string;
+  section?: string;
+  department?: string;
   password?: string;
   confirm?: string;
   terms?: string;
 }
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+interface DepartmentOption {
+  department_id: number;
+  department_name: string;
+}
+
+interface SectionOption {
+  section_name: string;
+  course_code: string | null;
+  year_level: string | null;
+}
+
 const USERNAME_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 export default function Signup() {
   const { signup, user } = useAuth();
-  const navigate = useNavigate();
-
+  
   const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<AccountRole>("student");
+  const [section, setSection] = useState("");
+  const [sections, setSections] = useState<SectionOption[]>([]);
+  const [department, setDepartment] = useState("");
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+  const [specialization, setSpecialization] = useState("");
+  const [submitted, setSubmitted] = useState(false);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [terms, setTerms] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<{ sections: SectionOption[] }>("/api/auth/sections")
+      .then((result) => {
+        if (!cancelled) setSections(result.sections);
+      })
+      .catch(() => {
+        // The section list is optional; students can still register without it.
+      });
+    api
+      .get<{ departments: DepartmentOption[] }>("/api/auth/departments")
+      .then((result) => {
+        if (!cancelled) setDepartments(result.departments);
+      })
+      .catch(() => {
+        // Optional list; faculty can still register without it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (user) {
     return <Navigate to={homePath(user.roles)} replace />;
@@ -62,13 +104,16 @@ export default function Signup() {
 
     const nextErrors: FieldErrors = {};
     if (fullName.trim().length < 2) nextErrors.full_name = "Enter your full name.";
-    if (!EMAIL_PATTERN.test(email.trim())) {
-      nextErrors.email = "Enter a valid email address.";
-    }
     if (username.trim().length < 3) {
       nextErrors.username = "Username must be at least 3 characters.";
     } else if (!USERNAME_PATTERN.test(username.trim())) {
       nextErrors.username = "Use only letters, numbers, dots, dashes, or underscores.";
+    }
+    if (role === "student" && sections.length > 0 && !section) {
+      nextErrors.section = "Choose your section.";
+    }
+    if (role === "teacher" && departments.length > 0 && !department) {
+      nextErrors.department = "Choose your department.";
     }
     if (password.length < 8) {
       nextErrors.password = "Password must be at least 8 characters.";
@@ -88,10 +133,14 @@ export default function Signup() {
 
     const payload: SignupPayload = {
       full_name: fullName.trim(),
-      email: email.trim(),
       username: username.trim(),
       role,
       password,
+      ...(role === "student" && section ? { section } : {}),
+      ...(role === "teacher" && department ? { department_id: Number(department) } : {}),
+      ...(role === "teacher" && specialization.trim()
+        ? { specialization: specialization.trim() }
+        : {}),
     };
 
     setErrors({});
@@ -99,9 +148,8 @@ export default function Signup() {
     setSubmitting(true);
 
     try {
-      const created = await signup(payload, true);
-      toast.success("Account created. Welcome to the portal.");
-      navigate(homePath(created.roles), { replace: true });
+      await signup(payload);
+      setSubmitted(true);
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -113,6 +161,31 @@ export default function Signup() {
       setSubmitting(false);
     }
   };
+
+  if (submitted) {
+    return (
+      <AuthShell mode="signup">
+        <div className="mx-auto w-full max-w-md text-center">
+          <span className="mx-auto grid h-14 w-14 place-items-center rounded-full border border-emerald-400/30 bg-emerald-400/10 text-emerald-300">
+            <CheckCircle2 size={28} />
+          </span>
+          <h2 className="mt-5 text-3xl font-extrabold tracking-tight text-white">
+            Registration submitted
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed text-slate-400">
+            Thanks, {fullName.trim().split(" ")[0]}. Your account is waiting for admin
+            approval. You&apos;ll be able to sign in with{" "}
+            <span className="font-semibold text-slate-200">{username.trim()}</span> once
+            it&apos;s approved.
+          </p>
+          <Link to="/login" className="btn-accent mt-8 inline-flex w-full justify-center py-3 text-[15px]">
+            Back to sign in
+            <ArrowRight size={18} />
+          </Link>
+        </div>
+      </AuthShell>
+    );
+  }
 
   return (
     <AuthShell mode="signup">
@@ -141,26 +214,6 @@ export default function Signup() {
               if (errors.full_name) clearError("full_name");
             }}
             error={errors.full_name}
-            disabled={submitting}
-            required
-          />
-
-          <AuthInput
-            id="email"
-            name="email"
-            label="School email"
-            type="email"
-            icon={<Mail size={18} />}
-            placeholder="Enter your school email"
-            autoComplete="email"
-            autoCapitalize="none"
-            spellCheck={false}
-            value={email}
-            onChange={(event) => {
-              setEmail(event.target.value);
-              if (errors.email) clearError("email");
-            }}
-            error={errors.email}
             disabled={submitting}
             required
           />
@@ -245,6 +298,120 @@ export default function Signup() {
               })}
             </div>
           </fieldset>
+
+          {role === "student" ? (
+            <div>
+              <label
+                htmlFor="signup_section"
+                className="mb-1.5 block text-sm font-semibold text-slate-200"
+              >
+                Section
+              </label>
+              <div className="relative">
+                <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                  <Layers size={18} />
+                </span>
+                <select
+                  id="signup_section"
+                  name="section"
+                  value={section}
+                  onChange={(event) => {
+                    setSection(event.target.value);
+                    if (errors.section) clearError("section");
+                  }}
+                  disabled={submitting || sections.length === 0}
+                  aria-invalid={errors.section ? true : undefined}
+                  className={`w-full appearance-none rounded-xl border border-white/15 bg-white/[0.04] py-3 pl-11 pr-10 text-[15px] text-white transition duration-200 hover:border-white/25 focus:border-accent-500 focus:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:opacity-60 ${
+                    errors.section ? "field-invalid" : ""
+                  }`}
+                >
+                  <option value="" className="bg-slate-900">
+                    {sections.length === 0 ? "No sections available yet" : "Select your section"}
+                  </option>
+                  {sections.map((item) => (
+                    <option key={item.section_name} value={item.section_name} className="bg-slate-900">
+                      {item.section_name}
+                      {item.course_code ? ` · ${item.course_code}` : ""}
+                      {item.year_level ? ` · ${item.year_level}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={18}
+                  className="pointer-events-none absolute inset-y-0 right-3 my-auto text-slate-400"
+                />
+              </div>
+              {errors.section ? (
+                <p className="mt-1.5 text-xs font-medium text-red-300">{errors.section}</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {role === "teacher" ? (
+            <>
+              <div>
+                <label
+                  htmlFor="signup_department"
+                  className="mb-1.5 block text-sm font-semibold text-slate-200"
+                >
+                  Department
+                </label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+                    <Building2 size={18} />
+                  </span>
+                  <select
+                    id="signup_department"
+                    name="department"
+                    value={department}
+                    onChange={(event) => {
+                      setDepartment(event.target.value);
+                      if (errors.department) clearError("department");
+                    }}
+                    disabled={submitting || departments.length === 0}
+                    aria-invalid={errors.department ? true : undefined}
+                    className={`w-full appearance-none rounded-xl border border-white/15 bg-white/[0.04] py-3 pl-11 pr-10 text-[15px] text-white transition duration-200 hover:border-white/25 focus:border-accent-500 focus:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:opacity-60 ${
+                      errors.department ? "field-invalid" : ""
+                    }`}
+                  >
+                    <option value="" className="bg-slate-900">
+                      {departments.length === 0
+                        ? "No departments available yet"
+                        : "Select your department"}
+                    </option>
+                    {departments.map((item) => (
+                      <option
+                        key={item.department_id}
+                        value={item.department_id}
+                        className="bg-slate-900"
+                      >
+                        {item.department_name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    size={18}
+                    className="pointer-events-none absolute inset-y-0 right-3 my-auto text-slate-400"
+                  />
+                </div>
+                {errors.department ? (
+                  <p className="mt-1.5 text-xs font-medium text-red-300">{errors.department}</p>
+                ) : null}
+              </div>
+
+              <AuthInput
+                id="signup_specialization"
+                name="specialization"
+                label="Specialization (optional)"
+                icon={<Sparkles size={18} />}
+                placeholder="e.g. Programming, Databases"
+                autoComplete="off"
+                value={specialization}
+                onChange={(event) => setSpecialization(event.target.value)}
+                disabled={submitting}
+              />
+            </>
+          ) : null}
 
           <AuthInput
             id="signup_password"

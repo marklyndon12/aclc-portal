@@ -140,7 +140,6 @@ export default function AuthShell({ mode, children }: AuthShellProps) {
                     </div>
                     <p className="mt-2 text-sm leading-relaxed text-slate-300">
                       New accounts may be reviewed by the registrar before activation.
-                      Use your official school email when registering.
                     </p>
                   </div>
                 </>

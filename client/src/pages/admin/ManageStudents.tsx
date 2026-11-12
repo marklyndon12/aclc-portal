@@ -1,45 +1,54 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { GraduationCap, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import clsx from "clsx";
 import { toast } from "sonner";
 import Modal from "../../components/Modal";
 import { GlassInput, GlassSelect } from "../../components/ui/FormControls";
 import { useAdminData } from "../../context/AdminDataContext";
+import { api, ApiError } from "../../lib/api";
+import type { AdminDataState } from "../../data/adminSeed";
 import type { AdminStudentRow } from "../../types";
+
+type RemoteData = Omit<AdminDataState, "version">;
 
 interface Draft {
   username: string;
+  password: string;
   full_name: string;
   student_number: string;
+  course_id: string; // "" = no course yet
+  section: string; // "Unassigned" or a section name
   year_level: string;
-  section: string;
-  course_year: string;
-  status: "Active" | "Disabled";
 }
 
 const YEAR_LEVELS = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
 
 const emptyDraft: Draft = {
   username: "",
+  password: "",
   full_name: "",
   student_number: "",
-  year_level: "1st Year",
+  course_id: "",
   section: "Unassigned",
-  course_year: "",
-  status: "Active",
+  year_level: "1st Year",
 };
 
 export default function ManageStudents() {
-  const { data, setData } = useAdminData();
+  const { data, replaceData } = useAdminData();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [saving, setSaving] = useState(false);
 
+  // Sections of the chosen course only
   const sectionOptions = useMemo(
-    () => ["Unassigned", ...data.sections.map((section) => section.section_name)],
-    [data.sections]
+    () =>
+      draft.course_id
+        ? data.sections.filter((section) => String(section.course_id) === draft.course_id)
+        : [],
+    [data.sections, draft.course_id]
   );
+  const chosenSection = data.sections.find((section) => section.section_name === draft.section);
 
   const rows = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -48,7 +57,8 @@ export default function ManageStudents() {
         !term ||
         row.full_name.toLowerCase().includes(term) ||
         row.student_number.toLowerCase().includes(term) ||
-        row.section.toLowerCase().includes(term)
+        row.section.toLowerCase().includes(term) ||
+        row.course_year.toLowerCase().includes(term)
     );
   }, [data.students, query]);
 
@@ -59,22 +69,43 @@ export default function ManageStudents() {
   };
 
   const openEdit = (row: AdminStudentRow) => {
+    const section = data.sections.find((item) => item.section_name === row.section);
+    const course =
+      data.courses.find((item) => item.course_code === row.course_year) ??
+      data.courses.find((item) => item.course_id === section?.course_id);
     setDraft({
       username: row.username,
+      password: "",
       full_name: row.full_name,
       student_number: row.student_number,
-      year_level: row.year_level,
+      course_id: course ? String(course.course_id) : "",
       section: row.section,
-      course_year: row.course_year,
-      status: row.status,
+      year_level: row.year_level,
     });
     setEditingId(row.student_id);
     setOpen(true);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const changeCourse = (courseId: string) => {
+    const stillFits = data.sections.some(
+      (section) =>
+        section.section_name === draft.section && String(section.course_id) === courseId
+    );
+    setDraft({ ...draft, course_id: courseId, section: stillFits ? draft.section : "Unassigned" });
+  };
+
+  const changeSection = (sectionName: string) => {
+    const section = data.sections.find((item) => item.section_name === sectionName);
+    setDraft({
+      ...draft,
+      section: sectionName,
+      year_level: section?.year_level || draft.year_level,
+    });
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const username = draft.username.trim().toLowerCase();
+    const username = draft.username.trim();
     const fullName = draft.full_name.trim();
     const studentNumber = draft.student_number.trim();
 
@@ -82,95 +113,49 @@ export default function ManageStudents() {
       toast.error("Username, full name, and student number are required");
       return;
     }
-
-    const editing = data.students.find((row) => row.student_id === editingId);
-    const duplicateUser = data.users.some(
-      (row) =>
-        row.username.toLowerCase() === username && row.user_id !== editing?.user_id
-    );
-    if (duplicateUser) {
-      toast.error("That username is already in use");
+    if (!editingId && draft.password.length < 8) {
+      toast.error("Password must be at least 8 characters");
+      return;
+    }
+    if (editingId && draft.password && draft.password.length < 8) {
+      toast.error("New password must be at least 8 characters");
       return;
     }
 
-    const duplicateNumber = data.students.some(
-      (row) =>
-        row.student_number.toLowerCase() === studentNumber.toLowerCase() &&
-        row.student_id !== editingId
-    );
-    if (duplicateNumber) {
-      toast.error("That student number is already in use");
-      return;
-    }
+    const course = data.courses.find((item) => String(item.course_id) === draft.course_id);
 
-    setData((previous) => {
-      if (editing) {
-        return {
-          ...previous,
-          students: previous.students.map((row) =>
-            row.student_id === editing.student_id
-              ? {
-                  ...row,
-                  ...draft,
-                  username,
-                  full_name: fullName,
-                  student_number: studentNumber,
-                }
-              : row
-          ),
-          users: previous.users.map((row) =>
-            row.user_id === editing.user_id
-              ? { ...row, username, full_name: fullName, status: draft.status }
-              : row
-          ),
-        };
-      }
-
-      const userId = crypto.randomUUID();
-      const newStudent: AdminStudentRow = {
-        student_id: Date.now(),
-        user_id: userId,
+    setSaving(true);
+    try {
+      const payload = {
         username,
         full_name: fullName,
         student_number: studentNumber,
         year_level: draft.year_level,
         section: draft.section,
-        course_year: draft.course_year,
-        status: draft.status,
+        course_year: course?.course_code ?? "",
+        ...(draft.password ? { password: draft.password } : {}),
       };
-
-      return {
-        ...previous,
-        students: [newStudent, ...previous.students],
-        users: [
-          {
-            user_id: userId,
-            username,
-            full_name: fullName,
-            role: "student",
-            status: draft.status,
-          },
-          ...previous.users,
-        ],
-      };
-    });
-
-    toast.success(editing ? `Updated ${fullName}` : `Added ${fullName}`);
-    setOpen(false);
+      const remote = editingId
+        ? await api.patch<RemoteData>(`/api/admin/students/${editingId}`, payload)
+        : await api.post<RemoteData>("/api/admin/students", payload);
+      replaceData(remote);
+      toast.success(editingId ? `Updated ${fullName}` : `Added ${fullName}`);
+      setOpen(false);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not save student");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = (row: AdminStudentRow) => {
+  const handleDelete = async (row: AdminStudentRow) => {
     if (!window.confirm(`Delete student ${row.full_name}?`)) return;
-    setData((previous) => ({
-      ...previous,
-      students: previous.students.filter((item) => item.student_id !== row.student_id),
-      users: previous.users.filter((item) => item.user_id !== row.user_id),
-      grades: previous.grades.filter((item) => item.student_id !== row.student_id),
-      attendance: previous.attendance.filter(
-        (item) => item.student_id !== row.student_id
-      ),
-    }));
-    toast.success(`Removed ${row.full_name}`);
+    try {
+      replaceData(await api.delete<RemoteData>(`/api/admin/students/${row.student_id}`));
+      toast.success(`Removed ${row.full_name}`);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not delete student");
+    }
   };
 
   return (
@@ -182,8 +167,8 @@ export default function ManageStudents() {
           </span>
           <h1 className="mt-3 text-2xl font-bold text-gray-100">Manage Students</h1>
           <p className="mt-1 max-w-2xl text-sm text-gray-400">
-            Maintain student profiles and section assignments. Changes sync to the
-            temporary user directory.
+            A student&apos;s course and year come from their section. Pick the course first,
+            then one of its sections.
           </p>
         </div>
         <button type="button" onClick={openCreate} className="btn-accent">
@@ -201,7 +186,7 @@ export default function ManageStudents() {
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search name, student number, or section"
+          placeholder="Search name, student number, course, or section"
           aria-label="Search students"
           className="input-glass pl-9"
         />
@@ -214,9 +199,9 @@ export default function ManageStudents() {
               <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-gray-400">
                 <th className="px-4 py-3 font-semibold">Student number</th>
                 <th className="px-4 py-3 font-semibold">Name</th>
+                <th className="px-4 py-3 font-semibold">Course</th>
                 <th className="px-4 py-3 font-semibold">Year</th>
                 <th className="px-4 py-3 font-semibold">Section</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
               </tr>
             </thead>
@@ -234,19 +219,18 @@ export default function ManageStudents() {
                       <p className="font-medium text-gray-100">{row.full_name}</p>
                       <p className="text-xs text-gray-500">@{row.username}</p>
                     </td>
+                    <td className="px-4 py-3 text-gray-400">
+                      {row.course_year && row.course_year !== "N/A" ? row.course_year : "—"}
+                    </td>
                     <td className="px-4 py-3 text-gray-400">{row.year_level}</td>
-                    <td className="px-4 py-3 text-gray-400">{row.section}</td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={clsx(
-                          "badge",
-                          row.status === "Active"
-                            ? "border-green-400/30 bg-green-400/10 text-green-400"
-                            : "border-gray-400/30 bg-gray-400/10 text-gray-400"
-                        )}
-                      >
-                        {row.status}
-                      </span>
+                    <td className="px-4 py-3 text-gray-400">
+                      {row.section === "Unassigned" ? (
+                        <span className="badge border-amber-400/30 bg-amber-400/10 text-amber-300">
+                          Unassigned
+                        </span>
+                      ) : (
+                        row.section
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
@@ -289,7 +273,7 @@ export default function ManageStudents() {
         open={open}
         onClose={() => setOpen(false)}
         title={editingId ? "Edit student" : "Add student"}
-        description="Temporary admin data is saved in this browser."
+        description="Saved to the database."
         size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -312,16 +296,52 @@ export default function ManageStudents() {
             <GlassInput
               label="Student number"
               value={draft.student_number}
-              onChange={(event) =>
-                setDraft({ ...draft, student_number: event.target.value })
-              }
+              onChange={(event) => setDraft({ ...draft, student_number: event.target.value })}
               placeholder="Enter student number"
               required
             />
+            <GlassInput
+              label={editingId ? "New password" : "Password"}
+              type="password"
+              value={draft.password}
+              onChange={(event) => setDraft({ ...draft, password: event.target.value })}
+              placeholder={editingId ? "Leave blank to keep the current one" : "At least 8 characters"}
+              autoComplete="new-password"
+              required={!editingId}
+            />
+            <GlassSelect
+              label="Course"
+              value={draft.course_id}
+              onChange={(event) => changeCourse(event.target.value)}
+              hint={data.courses.length === 0 ? "No courses yet — add them on the Courses page." : undefined}
+            >
+              <option value="">No course yet</option>
+              {data.courses.map((course) => (
+                <option key={course.course_id} value={course.course_id}>
+                  {course.course_code} — {course.course_name}
+                </option>
+              ))}
+            </GlassSelect>
+            <GlassSelect
+              label="Section"
+              value={draft.section}
+              onChange={(event) => changeSection(event.target.value)}
+              disabled={!draft.course_id}
+              hint={!draft.course_id ? "Choose a course first." : undefined}
+            >
+              <option value="Unassigned">Unassigned</option>
+              {sectionOptions.map((section) => (
+                <option key={section.section_id} value={section.section_name}>
+                  {section.section_name} — {section.year_level}
+                </option>
+              ))}
+            </GlassSelect>
             <GlassSelect
               label="Year level"
               value={draft.year_level}
               onChange={(event) => setDraft({ ...draft, year_level: event.target.value })}
+              disabled={Boolean(chosenSection)}
+              hint={chosenSection ? "Set by the section." : undefined}
             >
               {YEAR_LEVELS.map((year) => (
                 <option key={year} value={year}>
@@ -329,42 +349,13 @@ export default function ManageStudents() {
                 </option>
               ))}
             </GlassSelect>
-            <GlassSelect
-              label="Section"
-              value={draft.section}
-              onChange={(event) => setDraft({ ...draft, section: event.target.value })}
-            >
-              {sectionOptions.map((section) => (
-                <option key={section} value={section}>
-                  {section}
-                </option>
-              ))}
-            </GlassSelect>
-            <GlassInput
-              label="Course / program"
-              value={draft.course_year}
-              onChange={(event) =>
-                setDraft({ ...draft, course_year: event.target.value })
-              }
-              placeholder="Enter course year"
-            />
-            <GlassSelect
-              label="Status"
-              value={draft.status}
-              onChange={(event) =>
-                setDraft({ ...draft, status: event.target.value as Draft["status"] })
-              }
-            >
-              <option value="Active">Active</option>
-              <option value="Disabled">Disabled</option>
-            </GlassSelect>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setOpen(false)} className="btn-glass">
               Cancel
             </button>
-            <button type="submit" className="btn-accent">
-              Save changes
+            <button type="submit" disabled={saving} className="btn-accent">
+              {saving ? "Saving..." : "Save changes"}
             </button>
           </div>
         </form>

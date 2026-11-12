@@ -4,13 +4,18 @@ import { toast } from "sonner";
 import Modal from "../../components/Modal";
 import { GlassInput, GlassSelect } from "../../components/ui/FormControls";
 import { useAdminData } from "../../context/AdminDataContext";
+import { api, ApiError } from "../../lib/api";
+import type { AdminDataState } from "../../data/adminSeed";
 import type { SubjectRow } from "../../types";
+
+type RemoteData = Omit<AdminDataState, "version">;
 
 interface Draft {
   subject_code: string;
   subject_name: string;
   units: string;
   year_level: string;
+  course_id: string; // "" = general subject (every course)
 }
 
 const YEAR_LEVELS = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
@@ -20,10 +25,12 @@ const emptyDraft: Draft = {
   subject_name: "",
   units: "3",
   year_level: "1st Year",
+  course_id: "",
 };
 
 export default function ManageSubjects() {
-  const { data, setData } = useAdminData();
+  const { data, replaceData } = useAdminData();
+  const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -40,12 +47,13 @@ export default function ManageSubjects() {
       subject_name: row.subject_name,
       units: String(row.units),
       year_level: row.year_level,
+      course_id: row.course_id ? String(row.course_id) : "",
     });
     setEditingId(row.subject_id);
     setOpen(true);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const code = draft.subject_code.trim();
     const name = draft.subject_name.trim();
@@ -60,63 +68,36 @@ export default function ManageSubjects() {
       return;
     }
 
-    const duplicate = data.subjects.some(
-      (row) =>
-        row.subject_code.toLowerCase() === code.toLowerCase() &&
-        row.subject_id !== editingId
-    );
-    if (duplicate) {
-      toast.error("That subject code already exists");
-      return;
-    }
-
-    setData((previous) => {
-      if (editingId) {
-        return {
-          ...previous,
-          subjects: previous.subjects.map((row) =>
-            row.subject_id === editingId
-              ? {
-                  ...row,
-                  subject_code: code,
-                  subject_name: name,
-                  units,
-                  year_level: draft.year_level,
-                }
-              : row
-          ),
-        };
-      }
-
-      const newSubject: SubjectRow = {
-        subject_id: Date.now(),
+    setSaving(true);
+    try {
+      const payload = {
         subject_code: code,
         subject_name: name,
         units,
         year_level: draft.year_level,
+        course_id: draft.course_id ? Number(draft.course_id) : null,
       };
-
-      return { ...previous, subjects: [newSubject, ...previous.subjects] };
-    });
-
-    toast.success(editingId ? `Updated ${code}` : `Created ${code}`);
-    setOpen(false);
+      const remote = editingId
+        ? await api.patch<RemoteData>(`/api/admin/subjects/${editingId}`, payload)
+        : await api.post<RemoteData>("/api/admin/subjects", payload);
+      replaceData(remote);
+      toast.success(editingId ? `Updated ${code}` : `Created ${code}`);
+      setOpen(false);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not save subject");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = (row: SubjectRow) => {
-    const linked = data.courses.filter(
-      (course) => course.subject_code === row.subject_code
-    ).length;
-    if (linked > 0) {
-      toast.error(`Cannot delete ${row.subject_code}: ${linked} course(s) use it`);
-      return;
-    }
+  const handleDelete = async (row: SubjectRow) => {
     if (!window.confirm(`Delete subject ${row.subject_code}?`)) return;
-    setData((previous) => ({
-      ...previous,
-      subjects: previous.subjects.filter((item) => item.subject_id !== row.subject_id),
-    }));
-    toast.success(`Removed ${row.subject_code}`);
+    try {
+      replaceData(await api.delete<RemoteData>(`/api/admin/subjects/${row.subject_id}`));
+      toast.success(`Removed ${row.subject_code}`);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not delete subject");
+    }
   };
 
   return (
@@ -128,8 +109,9 @@ export default function ManageSubjects() {
           </span>
           <h1 className="mt-3 text-2xl font-bold text-gray-100">Manage Subjects</h1>
           <p className="mt-1 max-w-2xl text-sm text-gray-400">
-            Subject catalog used by course offerings. Delete is blocked while courses
-            reference a subject.
+            The subject catalog. Each subject belongs to one year level and to one course
+            (or to all courses), and can only be given to matching sections. Delete is
+            blocked while classes use it.
           </p>
         </div>
         <button type="button" onClick={openCreate} className="btn-accent">
@@ -146,6 +128,7 @@ export default function ManageSubjects() {
                 <th className="px-4 py-3 font-semibold">Code</th>
                 <th className="px-4 py-3 font-semibold">Subject</th>
                 <th className="px-4 py-3 font-semibold">Units</th>
+                <th className="px-4 py-3 font-semibold">Course</th>
                 <th className="px-4 py-3 font-semibold">Year level</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
               </tr>
@@ -164,6 +147,13 @@ export default function ManageSubjects() {
                       {row.subject_name}
                     </td>
                     <td className="px-4 py-3 text-gray-400">{row.units}</td>
+                    <td className="px-4 py-3 text-gray-400">
+                      {row.course_code ?? (
+                        <span className="badge border-white/15 bg-white/5 text-gray-300">
+                          All courses
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-gray-400">{row.year_level}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
@@ -191,7 +181,7 @@ export default function ManageSubjects() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center">
+                  <td colSpan={6} className="px-4 py-12 text-center">
                     <BookOpen size={22} className="mx-auto text-gray-500" />
                     <p className="mt-2 text-sm text-gray-300">No subjects yet</p>
                   </td>
@@ -206,7 +196,7 @@ export default function ManageSubjects() {
         open={open}
         onClose={() => setOpen(false)}
         title={editingId ? "Edit subject" : "Add subject"}
-        description="Temporary admin data is saved in this browser."
+        description="Saved to the database."
         size="md"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -241,6 +231,19 @@ export default function ManageSubjects() {
               />
             </div>
             <GlassSelect
+              label="Course"
+              value={draft.course_id}
+              onChange={(event) => setDraft({ ...draft, course_id: event.target.value })}
+              hint="Pick “All courses” for general subjects every program takes."
+            >
+              <option value="">All courses (general)</option>
+              {data.courses.map((course) => (
+                <option key={course.course_id} value={course.course_id}>
+                  {course.course_code} — {course.course_name}
+                </option>
+              ))}
+            </GlassSelect>
+            <GlassSelect
               label="Year level"
               value={draft.year_level}
               onChange={(event) =>
@@ -258,8 +261,8 @@ export default function ManageSubjects() {
             <button type="button" onClick={() => setOpen(false)} className="btn-glass">
               Cancel
             </button>
-            <button type="submit" className="btn-accent">
-              Save changes
+            <button type="submit" disabled={saving} className="btn-accent">
+              {saving ? "Saving..." : "Save changes"}
             </button>
           </div>
         </form>

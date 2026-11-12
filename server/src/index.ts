@@ -4,6 +4,9 @@ import helmet from "helmet";
 import { env } from "./config/env";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import authRouter from "./routes/auth.routes";
+import adminRouter from "./routes/admin.routes";
+import teacherRouter from "./routes/teacher.routes";
+import studentRouter from "./routes/student.routes";
 
 const app = express();
 
@@ -16,6 +19,9 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api/auth", authRouter);
+app.use("/api/admin", adminRouter);
+app.use("/api/teacher", teacherRouter);
+app.use("/api/student", studentRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

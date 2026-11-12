@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { ApiError, api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import type { SessionResponse } from "../types";
 
 const POLL_INTERVAL_MS = 10_000;
 
 export function useSessionBouncer(): void {
-  const { token, user, expireSession } = useAuth();
+  const { token, user, expireSession, updateUser } = useAuth();
 
   useEffect(() => {
     if (!token || !user) {
@@ -16,7 +17,8 @@ export function useSessionBouncer(): void {
 
     const checkSession = async () => {
       try {
-        await api.get("/api/auth/session");
+        const result = await api.get<SessionResponse>("/api/auth/session");
+        if (!stopped) updateUser(result.user);
       } catch (error) {
         if (stopped) {
           return;
@@ -35,5 +37,5 @@ export function useSessionBouncer(): void {
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [token, user, expireSession]);
+  }, [token, user, expireSession, updateUser]);
 }

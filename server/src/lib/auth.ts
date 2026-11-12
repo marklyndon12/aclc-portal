@@ -60,11 +60,28 @@ export async function loadProfile(
   if (role === "teacher") {
     const { data, error } = await supabaseAdmin
       .from("teachers")
-      .select("teacher_id, user_id, full_name, department, specialization")
+      .select("teacher_id, user_id, full_name, department_id, specialization")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) throw error;
-    return data;
+    if (!data) return null;
+
+    let department: string | null = null;
+    if (data.department_id) {
+      const { data: row } = await supabaseAdmin
+        .from("departments")
+        .select("department_name")
+        .eq("department_id", data.department_id)
+        .maybeSingle();
+      department = row?.department_name ?? null;
+    }
+    return {
+      teacher_id: data.teacher_id,
+      user_id: data.user_id,
+      full_name: data.full_name,
+      department,
+      specialization: data.specialization,
+    };
   }
 
   return null;

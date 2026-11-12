@@ -13,17 +13,29 @@ import Signup from "./pages/Signup";
 import AdminRegister from "./pages/AdminRegister";
 import AdminAttendance from "./pages/admin/AdminAttendance";
 import AdminDashboard from "./pages/admin/AdminDashboard";
-import AdminGrades from "./pages/admin/AdminGrades";
 import ManageAnnouncements from "./pages/admin/ManageAnnouncements";
 import ManageCourses from "./pages/admin/ManageCourses";
+import ManageDepartments from "./pages/admin/ManageDepartments";
 import ManageSchedule from "./pages/admin/ManageSchedule";
 import ManageSections from "./pages/admin/ManageSections";
 import ManageStudents from "./pages/admin/ManageStudents";
 import ManageSubjects from "./pages/admin/ManageSubjects";
 import ManageTeachers from "./pages/admin/ManageTeachers";
 import ManageUsers from "./pages/admin/ManageUsers";
+import StudentAnnouncements from "./pages/student/StudentAnnouncements";
+import StudentAttendance from "./pages/student/StudentAttendance";
 import StudentDashboard from "./pages/student/StudentDashboard";
+import StudentGrades from "./pages/student/StudentGrades";
+import StudentQuizTake from "./pages/student/StudentQuizTake";
+import StudentQuizzes from "./pages/student/StudentQuizzes";
+import StudentSchedule from "./pages/student/StudentSchedule";
+import TeacherAnnouncements from "./pages/teacher/TeacherAnnouncements";
+import TeacherAttendance from "./pages/teacher/TeacherAttendance";
+import TeacherClasses from "./pages/teacher/TeacherClasses";
 import TeacherDashboard from "./pages/teacher/TeacherDashboard";
+import TeacherGrades from "./pages/teacher/TeacherGrades";
+import TeacherMyAttendance from "./pages/teacher/TeacherMyAttendance";
+import TeacherQuizzes from "./pages/teacher/TeacherQuizzes";
 
 function RootRedirect() {
   const { user } = useAuth();
@@ -58,12 +70,12 @@ export default function App() {
                 <Route path="users" element={<ManageUsers />} />
                 <Route path="students" element={<ManageStudents />} />
                 <Route path="teachers" element={<ManageTeachers />} />
+                <Route path="departments" element={<ManageDepartments />} />
                 <Route path="sections" element={<ManageSections />} />
                 <Route path="subjects" element={<ManageSubjects />} />
                 <Route path="courses" element={<ManageCourses />} />
                 <Route path="schedule" element={<ManageSchedule />} />
                 <Route path="attendance" element={<AdminAttendance />} />
-                <Route path="grades" element={<AdminGrades />} />
                 <Route path="announcements" element={<ManageAnnouncements />} />
                 <Route path="*" element={<ComingSoon title="Page not found" />} />
               </Route>
@@ -73,12 +85,12 @@ export default function App() {
               <Route path="teacher" element={<DashboardLayout />}>
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<TeacherDashboard />} />
-                <Route path="classes" element={<ComingSoon title="My Classes" />} />
-                <Route path="attendance" element={<ComingSoon title="QR Attendance" />} />
-                <Route path="grades" element={<ComingSoon title="Grade Management" />} />
-                <Route path="quizzes" element={<ComingSoon title="Quizzes" />} />
-                <Route path="attendance-log" element={<ComingSoon title="My Attendance" />} />
-                <Route path="announcements" element={<ComingSoon title="Announcements" />} />
+                <Route path="classes" element={<TeacherClasses />} />
+                <Route path="attendance" element={<TeacherAttendance />} />
+                <Route path="grades" element={<TeacherGrades />} />
+                <Route path="quizzes" element={<TeacherQuizzes />} />
+                <Route path="attendance-log" element={<TeacherMyAttendance />} />
+                <Route path="announcements" element={<TeacherAnnouncements />} />
                 <Route path="*" element={<ComingSoon title="Page not found" />} />
               </Route>
             </Route>
@@ -87,11 +99,12 @@ export default function App() {
               <Route path="student" element={<DashboardLayout />}>
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="dashboard" element={<StudentDashboard />} />
-                <Route path="schedule" element={<ComingSoon title="My Schedule" />} />
-                <Route path="grades" element={<ComingSoon title="My Grades" />} />
-                <Route path="attendance" element={<ComingSoon title="My Attendance" />} />
-                <Route path="quizzes" element={<ComingSoon title="Quizzes" />} />
-                <Route path="announcements" element={<ComingSoon title="Announcements" />} />
+                <Route path="schedule" element={<StudentSchedule />} />
+                <Route path="grades" element={<StudentGrades />} />
+                <Route path="attendance" element={<StudentAttendance />} />
+                <Route path="quizzes" element={<StudentQuizzes />} />
+                <Route path="quizzes/:id" element={<StudentQuizTake />} />
+                <Route path="announcements" element={<StudentAnnouncements />} />
                 <Route path="*" element={<ComingSoon title="Page not found" />} />
               </Route>
             </Route>

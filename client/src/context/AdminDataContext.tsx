@@ -14,14 +14,18 @@ import {
   adminSeed,
   type AdminDataState,
 } from "../data/adminSeed";
+import { api } from "../lib/api";
 
-const STORAGE_KEY = "aclc.admin.data.v3";
-const LEGACY_STORAGE_KEYS = ["aclc.admin.demo.v1", "aclc.admin.demo.v2"];
+type RemoteAdminData = Omit<AdminDataState, "version">;
 
 interface AdminDataValue {
   data: AdminDataState;
   setData: Dispatch<SetStateAction<AdminDataState>>;
-  resetData: () => void;
+  /** Replace local state with a payload returned by the admin API. */
+  replaceData: (remote: RemoteAdminData) => void;
+  /** Re-fetch everything from the database. */
+  refresh: () => Promise<void>;
+  loading: boolean;
 }
 
 const AdminDataContext = createContext<AdminDataValue | null>(null);
@@ -30,54 +34,31 @@ function cloneSeed(): AdminDataState {
   return JSON.parse(JSON.stringify(adminSeed)) as AdminDataState;
 }
 
-function readInitialData(): AdminDataState {
-  try {
-    LEGACY_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return cloneSeed();
-    const parsed = JSON.parse(raw) as Partial<AdminDataState>;
-    if (
-      parsed.version === ADMIN_DATA_VERSION &&
-      Array.isArray(parsed.users) &&
-      Array.isArray(parsed.students) &&
-      Array.isArray(parsed.teachers) &&
-      Array.isArray(parsed.sections) &&
-      Array.isArray(parsed.subjects) &&
-      Array.isArray(parsed.courses) &&
-      Array.isArray(parsed.attendance) &&
-      Array.isArray(parsed.grades) &&
-      Array.isArray(parsed.announcements)
-    ) {
-      return parsed as AdminDataState;
-    }
-  } catch {
-    return cloneSeed();
-  }
-  return cloneSeed();
-}
-
 export function AdminDataProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<AdminDataState>(readInitialData);
+  const [data, setData] = useState<AdminDataState>(cloneSeed);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (data.version !== ADMIN_DATA_VERSION) {
-      setData(cloneSeed());
-      return;
-    }
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch {
-      // localStorage can be unavailable in private browsing
-    }
-  }, [data, setData]);
-
-  const resetData = useCallback(() => {
-    setData(cloneSeed());
+  const replaceData = useCallback((remote: RemoteAdminData) => {
+    setData({ ...cloneSeed(), ...remote, version: ADMIN_DATA_VERSION });
   }, []);
 
+  const refresh = useCallback(async () => {
+    try {
+      replaceData(await api.get<RemoteAdminData>("/api/admin/data"));
+    } catch (error) {
+      console.error("Could not load admin data", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [replaceData]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
   const value = useMemo<AdminDataValue>(
-    () => ({ data, setData, resetData }),
-    [data, resetData]
+    () => ({ data, setData, replaceData, refresh, loading }),
+    [data, replaceData, refresh, loading]
   );
 
   return (

@@ -3,25 +3,27 @@ import type {
   AdminTeacherRow,
   AdminUserRow,
   AnnouncementRow,
-  AttendanceRecord,
+  DepartmentRow,
+  ClassRow,
   Course,
-  GradeRecord,
   SectionRow,
   SubjectRow,
+  TeacherAttendanceRecord,
 } from "../types";
 
-export const ADMIN_DATA_VERSION = 3;
+export const ADMIN_DATA_VERSION = 6;
 
 export interface AdminDataState {
   version: number;
   users: AdminUserRow[];
   students: AdminStudentRow[];
   teachers: AdminTeacherRow[];
+  departments: DepartmentRow[];
   sections: SectionRow[];
   subjects: SubjectRow[];
   courses: Course[];
-  attendance: AttendanceRecord[];
-  grades: GradeRecord[];
+  classes: ClassRow[];
+  teacherAttendance: TeacherAttendanceRecord[];
   announcements: AnnouncementRow[];
 }
 
@@ -30,10 +32,11 @@ export const adminSeed: AdminDataState = {
   users: [],
   students: [],
   teachers: [],
+  departments: [],
   sections: [],
   subjects: [],
   courses: [],
-  attendance: [],
-  grades: [],
+  classes: [],
+  teacherAttendance: [],
   announcements: [],
 };

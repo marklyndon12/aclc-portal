@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Award,
   BookOpen,
+  Building2,
   Briefcase,
   CalendarDays,
   ClipboardCheck,
@@ -37,12 +38,12 @@ const navByRole: Record<Role, NavItem[]> = {
     { to: "/admin/users", label: "Users", icon: Users },
     { to: "/admin/students", label: "Students", icon: GraduationCap },
     { to: "/admin/teachers", label: "Teachers", icon: Briefcase },
+    { to: "/admin/departments", label: "Departments", icon: Building2 },
     { to: "/admin/sections", label: "Sections", icon: Layers },
     { to: "/admin/subjects", label: "Subjects", icon: BookOpen },
     { to: "/admin/courses", label: "Courses", icon: BookOpen },
     { to: "/admin/schedule", label: "Schedule", icon: CalendarDays },
-    { to: "/admin/attendance", label: "Attendance", icon: ClipboardCheck },
-    { to: "/admin/grades", label: "Grades", icon: Award },
+    { to: "/admin/attendance", label: "Teacher Attendance", icon: ClipboardCheck },
     { to: "/admin/announcements", label: "Announcements", icon: Megaphone },
   ],
   teacher: [

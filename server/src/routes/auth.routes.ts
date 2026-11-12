@@ -45,7 +45,6 @@ const signupLimiter = rateLimit({
 
 const signupSchema = z.object({
   full_name: z.string().trim().min(2).max(150),
-  email: z.string().trim().email().max(200),
   username: z
     .string()
     .trim()
@@ -53,6 +52,9 @@ const signupSchema = z.object({
     .max(100)
     .regex(/^[a-zA-Z0-9._-]+$/, "Username contains invalid characters"),
   role: z.enum(["student", "teacher"]),
+  section: z.string().trim().max(100).optional(),
+  department_id: z.number().int().positive().optional(),
+  specialization: z.string().trim().max(150).optional(),
   password: z.string().min(8).max(200),
 });
 
@@ -107,7 +109,7 @@ router.post("/login", loginLimiter, async (req, res, next) => {
 
     const { data: user, error } = await supabaseAdmin
       .from("users")
-      .select("user_id, username, password, roles")
+      .select("user_id, username, password, roles, approval_status")
       .eq("username", username)
       .maybeSingle();
 
@@ -117,6 +119,22 @@ router.post("/login", loginLimiter, async (req, res, next) => {
 
     if (!user || !(await verifyPassword(password, user.password))) {
       throw new ApiError(401, "Invalid username or password", "INVALID_CREDENTIALS");
+    }
+
+    // Checked only after the password is verified so usernames cannot be probed.
+    if (user.approval_status === "pending") {
+      throw new ApiError(
+        403,
+        "Your account is still waiting for admin approval. Please try again later.",
+        "ACCOUNT_PENDING"
+      );
+    }
+    if (user.approval_status === "rejected") {
+      throw new ApiError(
+        403,
+        "Your registration was not approved. Please contact the registrar.",
+        "ACCOUNT_REJECTED"
+      );
     }
 
     const token = generateSessionToken();
@@ -136,9 +154,54 @@ router.post("/login", loginLimiter, async (req, res, next) => {
   }
 });
 
+// Public list of sections so students can pick theirs while registering.
+async function loadSectionsWithCourse() {
+  const [sectionsResult, coursesResult] = await Promise.all([
+    supabaseAdmin
+      .from("sections")
+      .select("section_name, year_level, course_id")
+      .order("section_name"),
+    supabaseAdmin.from("courses").select("course_id, course_code"),
+  ]);
+  if (sectionsResult.error || coursesResult.error) {
+    throw new ApiError(500, "Could not load sections", "SECTIONS_FAILED");
+  }
+  const codeById = new Map(
+    (coursesResult.data ?? []).map((row) => [row.course_id as number, row.course_code as string])
+  );
+  return (sectionsResult.data ?? []).map((row) => ({
+    section_name: row.section_name as string,
+    year_level: (row.year_level as string | null) ?? null,
+    course_code: codeById.get(row.course_id as number) ?? null,
+  }));
+}
+
+router.get("/sections", async (_req, res, next) => {
+  try {
+    res.json({ sections: await loadSectionsWithCourse() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Public list of departments so faculty can pick theirs while registering.
+router.get("/departments", async (_req, res, next) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("departments")
+      .select("department_id, department_name")
+      .order("department_name");
+    if (error) throw new ApiError(500, "Could not load departments", "DEPARTMENTS_FAILED");
+    res.json({ departments: data ?? [] });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post("/signup", signupLimiter, async (req, res, next) => {
   try {
-    const { full_name, username, role, password } = signupSchema.parse(req.body);
+    const { full_name, username, role, password, section, department_id, specialization } =
+      signupSchema.parse(req.body);
 
     const { data: existing, error: lookupError } = await supabaseAdmin
       .from("users")
@@ -154,12 +217,44 @@ router.post("/signup", signupLimiter, async (req, res, next) => {
       throw new ApiError(409, "That username is already taken", "USERNAME_TAKEN");
     }
 
-    const hash = await hashPassword(password);
-    const token = generateSessionToken();
+    // Students must pick one of the real sections (when any exist).
+    let sectionRow: {
+      section_name: string;
+      course_code: string | null;
+      year_level: string | null;
+    } | null = null;
+    if (role === "student") {
+      const sections = await loadSectionsWithCourse();
+      if (sections.length > 0) {
+        sectionRow = sections.find((item) => item.section_name === section) ?? null;
+        if (!sectionRow) {
+          throw new ApiError(400, "Please choose your section", "SECTION_REQUIRED");
+        }
+      }
+    }
 
+    // Faculty must pick one of the real departments (when any exist).
+    let departmentId: number | null = null;
+    if (role === "teacher") {
+      const { data: departments, error: departmentError } = await supabaseAdmin
+        .from("departments")
+        .select("department_id");
+      if (departmentError) {
+        throw new ApiError(500, "Could not load departments", "DEPARTMENTS_FAILED");
+      }
+      if ((departments ?? []).length > 0) {
+        const match = (departments ?? []).find((item) => item.department_id === department_id);
+        if (!match) throw new ApiError(400, "Please choose your department", "DEPARTMENT_REQUIRED");
+        departmentId = match.department_id as number;
+      }
+    }
+
+    const hash = await hashPassword(password);
+
+    // New accounts wait for an admin to approve them; no session is issued yet.
     const { data: user, error: insertError } = await supabaseAdmin
       .from("users")
-      .insert({ username, password: hash, roles: role, session_token: token })
+      .insert({ username, password: hash, roles: role, approval_status: "pending" })
       .select("user_id, username, roles")
       .single();
 
@@ -167,6 +262,7 @@ router.post("/signup", signupLimiter, async (req, res, next) => {
       if (insertError?.code === "23505") {
         throw new ApiError(409, "That username is already taken", "USERNAME_TAKEN");
       }
+      console.error("Signup user insert failed", insertError);
       throw new ApiError(500, "Could not create account", "SIGNUP_FAILED");
     }
 
@@ -177,9 +273,10 @@ router.post("/signup", signupLimiter, async (req, res, next) => {
               user_id: user.user_id,
               full_name,
               student_number: `PENDING-${username}`,
-              year_level: "1st Year",
-              section: "Unassigned",
-              course_year: "N/A",
+              year_level: sectionRow?.year_level || "1st Year",
+              section: sectionRow?.section_name ?? "Unassigned",
+              course_year: sectionRow?.course_code || "N/A",
+              username,
               password: hash,
             })
           ).error
@@ -187,13 +284,15 @@ router.post("/signup", signupLimiter, async (req, res, next) => {
             await supabaseAdmin.from("teachers").insert({
               user_id: user.user_id,
               full_name,
-              department: "Unassigned",
-              specialization: "N/A",
+              department_id: departmentId,
+              specialization: specialization || "N/A",
+              username,
               password: hash,
             })
           ).error;
 
     if (profileError) {
+      console.error("Signup profile insert failed", profileError);
       await supabaseAdmin.from("users").delete().eq("user_id", user.user_id);
       throw new ApiError(
         500,
@@ -202,8 +301,10 @@ router.post("/signup", signupLimiter, async (req, res, next) => {
       );
     }
 
-    const sessionUser = await buildSessionUser(user);
-    res.status(201).json({ token, user: sessionUser });
+    res.status(201).json({
+      status: "pending",
+      message: "Registration submitted. You can sign in once an admin approves your account.",
+    });
   } catch (error) {
     next(error);
   }

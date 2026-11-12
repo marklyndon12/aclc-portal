@@ -10,7 +10,7 @@ import {
   Layers,
   MapPin,
   Megaphone,
-  RotateCcw,
+  RefreshCw,
   Users,
 } from "lucide-react";
 import clsx from "clsx";
@@ -46,13 +46,13 @@ const quickActions = [
   {
     to: "/admin/courses",
     label: "Manage courses",
-    description: "Sections, teachers, and rooms",
+    description: "Programs such as BSIT or BSHM",
     icon: BookOpen,
   },
   {
     to: "/admin/schedule",
     label: "Weekly schedule",
-    description: "Timetable and conflict checks",
+    description: "Assign days, times, and rooms",
     icon: CalendarDays,
   },
   {
@@ -64,20 +64,18 @@ const quickActions = [
 ];
 
 export default function AdminDashboard() {
-  const { data, resetData } = useAdminData();
+  const { data, refresh } = useAdminData();
   const { user } = useAuth();
 
   const weekday = new Date().toLocaleDateString("en-US", { weekday: "long" });
-  const todayCourses = [...data.courses]
+  const todayCourses = [...data.classes]
     .filter((course) => course.day === weekday)
     .sort((a, b) => (a.start_time ?? "").localeCompare(b.start_time ?? ""));
 
-  const todayAttendance = data.attendance.filter(
-    (record) => record.date === new Date().toISOString().slice(0, 10)
-  );
-  const presentToday = todayAttendance.filter(
-    (record) => record.status === "Present" || record.status === "Late"
-  ).length;
+  const today = new Date().toISOString().slice(0, 10);
+  const todayAttendance = data.teacherAttendance.filter((record) => record.date === today);
+  const presentToday = todayAttendance.filter((record) => record.status === "Present").length;
+  const onLeaveToday = todayAttendance.filter((record) => record.status === "On Leave").length;
 
   const stats = [
     {
@@ -99,9 +97,9 @@ export default function AdminDashboard() {
       icon: BookOpen,
     },
     {
-      label: "Attendance today",
+      label: "Teachers in today",
       value: presentToday,
-      detail: `${todayAttendance.length} records logged`,
+      detail: `${onLeaveToday} on leave · ${data.teachers.length} total`,
       icon: ClipboardCheck,
     },
   ];
@@ -110,10 +108,9 @@ export default function AdminDashboard() {
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .slice(0, 3);
 
-  const handleReset = () => {
-    if (!window.confirm("Reset all temporary admin data? This clears every entry.")) return;
-    resetData();
-    toast.success("Admin data cleared");
+  const handleRefresh = async () => {
+    await refresh();
+    toast.success("Data refreshed");
   };
 
   return (
@@ -122,10 +119,7 @@ export default function AdminDashboard() {
         <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-accent/20 blur-3xl" />
         <div className="relative flex flex-wrap items-start justify-between gap-4">
           <div>
-            <span className="badge border-amber-400/30 bg-amber-400/10 text-amber-300">
-              Temporary preview
-            </span>
-            <h1 className="mt-3 text-2xl font-bold text-gray-100 sm:text-3xl">
+            <h1 className="text-2xl font-bold text-gray-100 sm:text-3xl">
               Admin Control Panel
             </h1>
             <p className="mt-1 max-w-2xl text-sm text-gray-400">
@@ -135,11 +129,11 @@ export default function AdminDashboard() {
           </div>
           <button
             type="button"
-            onClick={handleReset}
+            onClick={handleRefresh}
             className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-gray-300 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
           >
-            <RotateCcw size={14} />
-            Reset data
+            <RefreshCw size={14} />
+            Refresh
           </button>
         </div>
       </section>
@@ -216,7 +210,7 @@ export default function AdminDashboard() {
             {todayCourses.length > 0 ? (
               todayCourses.map((course) => (
                 <div
-                  key={course.course_id}
+                  key={course.class_id}
                   className="flex flex-wrap items-center gap-3 px-5 py-3.5 transition hover:bg-white/5"
                 >
                   <div className="min-w-[92px]">
@@ -227,8 +221,8 @@ export default function AdminDashboard() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-gray-100">
-                      <span className="text-accent">{course.course_code}</span>{" "}
-                      {course.course_name}
+                      <span className="text-accent">{course.subject_code}</span>{" "}
+                      {course.subject_name}
                     </p>
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
                       <span className="inline-flex items-center gap-1">
@@ -253,7 +247,7 @@ export default function AdminDashboard() {
                   No classes scheduled for {weekday}
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
-                  Add courses from the course manager to populate this view.
+                  Assign days and times from the weekly schedule page.
                 </p>
               </div>
             )}

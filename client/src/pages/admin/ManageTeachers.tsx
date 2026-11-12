@@ -1,34 +1,38 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { Briefcase, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import clsx from "clsx";
 import { toast } from "sonner";
 import Modal from "../../components/Modal";
 import { GlassInput, GlassSelect } from "../../components/ui/FormControls";
 import { useAdminData } from "../../context/AdminDataContext";
+import { api, ApiError } from "../../lib/api";
+import type { AdminDataState } from "../../data/adminSeed";
 import type { AdminTeacherRow } from "../../types";
+
+type RemoteData = Omit<AdminDataState, "version">;
 
 interface Draft {
   username: string;
+  password: string;
   full_name: string;
-  department: string;
+  department_id: string; // "" = unassigned
   specialization: string;
-  status: "Active" | "Disabled";
 }
 
 const emptyDraft: Draft = {
   username: "",
+  password: "",
   full_name: "",
-  department: "",
+  department_id: "",
   specialization: "",
-  status: "Active",
 };
 
 export default function ManageTeachers() {
-  const { data, setData } = useAdminData();
+  const { data, replaceData } = useAdminData();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [saving, setSaving] = useState(false);
 
   const rows = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -50,91 +54,63 @@ export default function ManageTeachers() {
   const openEdit = (row: AdminTeacherRow) => {
     setDraft({
       username: row.username,
+      password: "",
       full_name: row.full_name,
-      department: row.department,
+      department_id: row.department_id ? String(row.department_id) : "",
       specialization: row.specialization,
-      status: row.status,
     });
     setEditingId(row.teacher_id);
     setOpen(true);
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const username = draft.username.trim().toLowerCase();
+    const username = draft.username.trim();
     const fullName = draft.full_name.trim();
 
     if (!username || !fullName) {
       toast.error("Username and full name are required");
       return;
     }
-
-    const editing = data.teachers.find((row) => row.teacher_id === editingId);
-    const duplicateUser = data.users.some(
-      (row) =>
-        row.username.toLowerCase() === username && row.user_id !== editing?.user_id
-    );
-    if (duplicateUser) {
-      toast.error("That username is already in use");
+    if (!editingId && draft.password.length < 8) {
+      toast.error("Password must be at least 8 characters");
+      return;
+    }
+    if (editingId && draft.password && draft.password.length < 8) {
+      toast.error("New password must be at least 8 characters");
       return;
     }
 
-    setData((previous) => {
-      if (editing) {
-        return {
-          ...previous,
-          teachers: previous.teachers.map((row) =>
-            row.teacher_id === editing.teacher_id
-              ? { ...row, ...draft, username, full_name: fullName }
-              : row
-          ),
-          users: previous.users.map((row) =>
-            row.user_id === editing.user_id
-              ? { ...row, username, full_name: fullName, status: draft.status }
-              : row
-          ),
-        };
-      }
-
-      const userId = crypto.randomUUID();
-      const newTeacher: AdminTeacherRow = {
-        teacher_id: Date.now(),
-        user_id: userId,
+    setSaving(true);
+    try {
+      const payload = {
         username,
         full_name: fullName,
-        department: draft.department,
-        specialization: draft.specialization,
-        status: draft.status,
+        department_id: draft.department_id ? Number(draft.department_id) : null,
+        specialization: draft.specialization.trim(),
+        ...(draft.password ? { password: draft.password } : {}),
       };
-
-      return {
-        ...previous,
-        teachers: [newTeacher, ...previous.teachers],
-        users: [
-          {
-            user_id: userId,
-            username,
-            full_name: fullName,
-            role: "teacher",
-            status: draft.status,
-          },
-          ...previous.users,
-        ],
-      };
-    });
-
-    toast.success(editing ? `Updated ${fullName}` : `Added ${fullName}`);
-    setOpen(false);
+      const remote = editingId
+        ? await api.patch<RemoteData>(`/api/admin/teachers/${editingId}`, payload)
+        : await api.post<RemoteData>("/api/admin/teachers", payload);
+      replaceData(remote);
+      toast.success(editingId ? `Updated ${fullName}` : `Added ${fullName}`);
+      setOpen(false);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not save teacher");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDelete = (row: AdminTeacherRow) => {
+  const handleDelete = async (row: AdminTeacherRow) => {
     if (!window.confirm(`Delete teacher ${row.full_name}?`)) return;
-    setData((previous) => ({
-      ...previous,
-      teachers: previous.teachers.filter((item) => item.teacher_id !== row.teacher_id),
-      users: previous.users.filter((item) => item.user_id !== row.user_id),
-    }));
-    toast.success(`Removed ${row.full_name}`);
+    try {
+      replaceData(await api.delete<RemoteData>(`/api/admin/teachers/${row.teacher_id}`));
+      toast.success(`Removed ${row.full_name}`);
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "Could not delete teacher");
+    }
   };
 
   return (
@@ -146,8 +122,8 @@ export default function ManageTeachers() {
           </span>
           <h1 className="mt-3 text-2xl font-bold text-gray-100">Manage Teachers</h1>
           <p className="mt-1 max-w-2xl text-sm text-gray-400">
-            Faculty profiles, departments, and specializations. Changes sync to the
-            temporary user directory.
+            Faculty profiles, departments, and specializations. Departments are managed on
+            the Departments page.
           </p>
         </div>
         <button type="button" onClick={openCreate} className="btn-accent">
@@ -173,13 +149,12 @@ export default function ManageTeachers() {
 
       <div className="glass overflow-hidden bg-white/10 shadow-lg">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[680px] text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-gray-400">
                 <th className="px-4 py-3 font-semibold">Name</th>
                 <th className="px-4 py-3 font-semibold">Department</th>
                 <th className="px-4 py-3 font-semibold">Specialization</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
               </tr>
             </thead>
@@ -194,22 +169,14 @@ export default function ManageTeachers() {
                       <p className="font-medium text-gray-100">{row.full_name}</p>
                       <p className="text-xs text-gray-500">@{row.username}</p>
                     </td>
-                    <td className="px-4 py-3 text-gray-400">{row.department || "—"}</td>
                     <td className="px-4 py-3 text-gray-400">
-                      {row.specialization || "—"}
+                      {row.department || (
+                        <span className="badge border-amber-400/30 bg-amber-400/10 text-amber-300">
+                          Unassigned
+                        </span>
+                      )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={clsx(
-                          "badge",
-                          row.status === "Active"
-                            ? "border-green-400/30 bg-green-400/10 text-green-400"
-                            : "border-gray-400/30 bg-gray-400/10 text-gray-400"
-                        )}
-                      >
-                        {row.status}
-                      </span>
-                    </td>
+                    <td className="px-4 py-3 text-gray-400">{row.specialization || "—"}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
                         <button
@@ -236,7 +203,7 @@ export default function ManageTeachers() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center">
+                  <td colSpan={4} className="px-4 py-12 text-center">
                     <Briefcase size={22} className="mx-auto text-gray-500" />
                     <p className="mt-2 text-sm text-gray-300">No teachers found</p>
                   </td>
@@ -251,7 +218,7 @@ export default function ManageTeachers() {
         open={open}
         onClose={() => setOpen(false)}
         title={editingId ? "Edit teacher" : "Add teacher"}
-        description="Temporary admin data is saved in this browser."
+        description="Saved to the database."
         size="lg"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -271,39 +238,45 @@ export default function ManageTeachers() {
               placeholder="Enter full name"
               required
             />
-            <GlassInput
+            <GlassSelect
               label="Department"
-              value={draft.department}
-              onChange={(event) =>
-                setDraft({ ...draft, department: event.target.value })
+              value={draft.department_id}
+              onChange={(event) => setDraft({ ...draft, department_id: event.target.value })}
+              hint={
+                data.departments.length === 0
+                  ? "No departments yet — add them on the Departments page."
+                  : undefined
               }
-              placeholder="Computer Studies"
-            />
+            >
+              <option value="">Unassigned</option>
+              {data.departments.map((department) => (
+                <option key={department.department_id} value={department.department_id}>
+                  {department.department_name}
+                </option>
+              ))}
+            </GlassSelect>
             <GlassInput
               label="Specialization"
               value={draft.specialization}
-              onChange={(event) =>
-                setDraft({ ...draft, specialization: event.target.value })
-              }
+              onChange={(event) => setDraft({ ...draft, specialization: event.target.value })}
               placeholder="Enter specialization"
             />
-            <GlassSelect
-              label="Status"
-              value={draft.status}
-              onChange={(event) =>
-                setDraft({ ...draft, status: event.target.value as Draft["status"] })
-              }
-            >
-              <option value="Active">Active</option>
-              <option value="Disabled">Disabled</option>
-            </GlassSelect>
+            <GlassInput
+              label={editingId ? "New password" : "Password"}
+              type="password"
+              value={draft.password}
+              onChange={(event) => setDraft({ ...draft, password: event.target.value })}
+              placeholder={editingId ? "Leave blank to keep the current one" : "At least 8 characters"}
+              autoComplete="new-password"
+              required={!editingId}
+            />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setOpen(false)} className="btn-glass">
               Cancel
             </button>
-            <button type="submit" className="btn-accent">
-              Save changes
+            <button type="submit" disabled={saving} className="btn-accent">
+              {saving ? "Saving..." : "Save changes"}
             </button>
           </div>
         </form>
