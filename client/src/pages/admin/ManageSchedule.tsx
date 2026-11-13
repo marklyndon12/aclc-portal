@@ -114,18 +114,20 @@ export default function ManageSchedule() {
   const section = data.sections.find((item) => String(item.section_id) === form.section_id);
 
   // Only subjects that fit the chosen section: same year, same course or general.
-  const subjectOptions = useMemo(() => {
-    if (!section) return [];
+  // Every subject that fits the section; the ones it already has are shown but can't be picked again.
+  const { subjectOptions, takenSubjects } = useMemo(() => {
+    if (!section) return { subjectOptions: [], takenSubjects: new Set<number>() };
     const taken = new Set(
       data.classes.filter((item) => item.section_id === section.section_id).map((item) => item.subject_id)
     );
-    return data.subjects.filter(
+    const fitting = data.subjects.filter(
       (subject) =>
         (!section.year_level || subject.year_level === section.year_level) &&
-        (subject.course_id === null || subject.course_id === section.course_id) &&
-        !taken.has(subject.subject_id)
+        (subject.course_id === null || subject.course_id === section.course_id)
     );
+    return { subjectOptions: fitting, takenSubjects: taken };
   }, [data.subjects, data.classes, section]);
+  const availableCount = subjectOptions.filter((subject) => !takenSubjects.has(subject.subject_id)).length;
 
   const liveClash = useMemo(() => {
     if (!section || !form.start_time || !form.end_time) return null;
@@ -469,16 +471,23 @@ export default function ManageSchedule() {
                   !section
                     ? "Choose a section first."
                     : subjectOptions.length === 0
-                      ? `No more ${section.year_level} ${section.course_code} subjects to give. Add one on the Subjects page.`
-                      : `Showing ${section.year_level} subjects for ${section.course_code} (and general subjects).`
+                      ? `There are no ${section.year_level} subjects for ${section.course_code} yet. Add one on the Subjects page.`
+                      : availableCount === 0
+                        ? `Every ${section.year_level} subject for ${section.course_code} is already scheduled for ${section.section_name}. Edit its class on the timetable, or add a new subject on the Subjects page.`
+                        : `Showing ${section.year_level} subjects for ${section.course_code} (and general subjects).`
                 }
                 required
               >
                 <option value="">Select a subject</option>
                 {subjectOptions.map((subject) => (
-                  <option key={subject.subject_id} value={subject.subject_id}>
+                  <option
+                    key={subject.subject_id}
+                    value={subject.subject_id}
+                    disabled={takenSubjects.has(subject.subject_id)}
+                  >
                     {subject.subject_code} — {subject.subject_name}
                     {subject.course_id === null ? " (general)" : ""}
+                    {takenSubjects.has(subject.subject_id) ? " — already scheduled" : ""}
                   </option>
                 ))}
               </GlassSelect>
